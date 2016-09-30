@@ -344,6 +344,7 @@ echo "$(tput sgr0)"
     cp -r platform/universal/* lib
     lipo -info lib/libprotobuf.a
     lipo -info lib/libprotobuf-lite.a
+    open lib/
 )
 
 if [ "${USE_GIT_MASTER}" == "YES" ]
