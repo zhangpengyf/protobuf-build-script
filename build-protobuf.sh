@@ -5,7 +5,7 @@ echo "###################################################################"
 echo "# Preparing to build Google Protobuf"
 echo "###################################################################"
 echo "$(tput sgr0)"
-
+export SED=`which sed`
 # The results will be stored relative to the location
 # where you stored this script, **not** relative to
 # the location of the protobuf git repo.
@@ -26,10 +26,11 @@ PROTOBUF_VERSION=2.6.1
 PROTOBUF_RELEASE_URL=https://codeload.github.com/google/protobuf/zip/v${PROTOBUF_VERSION}
 PROTOBUF_RELEASE_DIRNAME=protobuf-${PROTOBUF_VERSION}
 
+# if BUILD_MACOSX_X86_64=NO,you must install protoc in your system,because we need protoc
 BUILD_MACOSX_X86_64=YES
 
 BUILD_I386_IOSSIM=YES
-BUILD_X86_64_IOSSIM=YES
+BUILD_X86_64_IOSSIM=NO
 
 BUILD_IOS_ARMV7=YES
 BUILD_IOS_ARMV7S=YES
@@ -127,10 +128,11 @@ echo "$(tput sgr0)"
         then
             rm -rf "${PROTOBUF_RELEASE_DIRNAME}"
         fi
-        curl --location ${PROTOBUF_RELEASE_URL} --output ${PROTOBUF_RELEASE_DIRNAME}.zip
+        if [ ! -f "${PROTOBUF_RELEASE_DIRNAME}.zip" ]; then 
+            curl --location ${PROTOBUF_RELEASE_URL} --output ${PROTOBUF_RELEASE_DIRNAME}.zip
+        fi
         unzip ${PROTOBUF_RELEASE_DIRNAME}.zip
         mv "${PROTOBUF_RELEASE_DIRNAME}" "${PROTOBUF_SRC_DIR}"
-        rm ${PROTOBUF_RELEASE_DIRNAME}.zip
 
         # Remove the version of Google Test included with the release.
         # We will replace it with version 1.7.0 in a later step.
@@ -168,9 +170,10 @@ __EOF__
     if test ! -e gtest
     then
         echo "Google Test not present.  Fetching gtest-1.7.0 from the web..."
-        curl --location https://codeload.github.com/google/googletest/zip/release-1.7.0 --output googletest-release-1.7.0.zip
+        if [ ! -f "googletest-release-1.7.0.zip" ]; then 
+            curl --location https://codeload.github.com/google/googletest/zip/release-1.7.0 --output googletest-release-1.7.0.zip
+        fi
         unzip googletest-release-1.7.0.zip
-        rm googletest-release-1.7.0.zip
         mv googletest-release-1.7.0 gtest
     fi
 
@@ -201,9 +204,15 @@ then
         make check
         make install
     )
+    PROTOC=${PREFIX}/platform/x86_64-mac/bin/protoc
+else
+    PROTOC=protoc
 fi
 
-PROTOC=${PREFIX}/platform/x86_64-mac/bin/protoc
+if [ ! -n `which $PROTOC` ]; then
+ echo 'error:command protoc not available'
+ exit 1
+fi
 
 ###################################################################
 # This section contains the build commands for each of the 
@@ -238,7 +247,7 @@ then
     (
         cd ${PROTOBUF_SRC_DIR}
         make distclean
-        ./configure --build=x86_64-apple-${DARWIN} --host=x86_64-apple-${DARWIN} --with-protoc=${PROTOC} --disable-shared --prefix=${PREFIX} --exec-prefix=${PREFIX}/platform/x86_64-sim "CC=${CC}" "CFLAGS=${CFLAGS} -mios-simulator-version-min=${MIN_SDK_VERSION} -arch x86_64 -isysroot ${IPHONESIMULATOR_SYSROOT}" "CXX=${CXX}" "CXXFLAGS=${CXXFLAGS} -mios-simulator-version-min=${MIN_SDK_VERSION} -arch x86_64 -isysroot ${IPHONESIMULATOR_SYSROOT}" LDFLAGS="-arch x86_64 -mios-simulator-version-min=${MIN_SDK_VERSION} ${LDFLAGS} -L${IPHONESIMULATOR_SYSROOT}/usr/lib/ -L${IPHONESIMULATOR_SYSROOT}/usr/lib/system" "LIBS=${LIBS}"
+        ./configure --build=x86_64-apple-${DARWIN} --host="x86_64-apple-${DARWIN}" --with-protoc=${PROTOC} --disable-shared --prefix=${PREFIX} --exec-prefix=${PREFIX}/platform/x86_64-sim "CC=${CC}" "CFLAGS=${CFLAGS} -mios-simulator-version-min=${MIN_SDK_VERSION} -arch x86_64 -isysroot ${IPHONESIMULATOR_SYSROOT}" "CXX=${CXX}" "CXXFLAGS=${CXXFLAGS} -mios-simulator-version-min=${MIN_SDK_VERSION} -arch x86_64 -isysroot ${IPHONESIMULATOR_SYSROOT}" LDFLAGS="-arch x86_64 -mios-simulator-version-min=${MIN_SDK_VERSION} ${LDFLAGS} -L${IPHONESIMULATOR_SYSROOT}/usr/lib/ -L${IPHONESIMULATOR_SYSROOT}/usr/lib/system" "LIBS=${LIBS}"
         make
         make install
     )
@@ -304,18 +313,35 @@ echo "$(tput sgr0)"
 (
     cd ${PREFIX}/platform
     mkdir universal
-    lipo x86_64-sim/lib/libprotobuf.a i386-sim/lib/libprotobuf.a arm64-ios/lib/libprotobuf.a armv7s-ios/lib/libprotobuf.a armv7-ios/lib/libprotobuf.a -create -output universal/libprotobuf.a
-    lipo x86_64-sim/lib/libprotobuf-lite.a i386-sim/lib/libprotobuf-lite.a arm64-ios/lib/libprotobuf-lite.a armv7s-ios/lib/libprotobuf-lite.a armv7-ios/lib/libprotobuf-lite.a -create -output universal/libprotobuf-lite.a
+    ALL_LIB=""
+    for LIB in `find . -name libprotobuf.a`; do
+        ALL_LIB="${ALL_LIB} ${LIB}"
+    done
+    if [ ! -z "${ALL_LIB}" ]; then 
+        lipo ${ALL_LIB} -create -output universal/libprotobuf.a
+    fi
+
+    ALL_LIB=""
+    for LIB in `find . -name libprotobuf-lite.a`; do
+        ALL_LIB="${ALL_LIB} ${LIB}"
+    done
+    if [ ! -z "${ALL_LIB}" ]; then 
+        lipo ${ALL_LIB} -create -output universal/libprotobuf-lite.a
+    fi
+
+    echo ${ALL_LIB}
 )
 
 (
     cd ${PREFIX}
     mkdir bin
     mkdir lib
-    cp -r platform/x86_64-mac/bin/protoc bin
-    cp -r platform/x86_64-mac/lib/* lib
+    if [ "${BUILD_MACOSX_X86_64}" == "YES" ]
+        then
+        cp -r platform/x86_64-mac/bin/protoc bin
+        cp -r platform/x86_64-mac/lib/* lib
+    fi
     cp -r platform/universal/* lib
-    rm -rf platform
     lipo -info lib/libprotobuf.a
     lipo -info lib/libprotobuf-lite.a
 )
